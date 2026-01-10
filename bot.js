@@ -1,3 +1,8 @@
+const subscriptionService = require('./services/subscription');
+const paywallManager = require('./services/paywallManager');
+const gamificationService = require('./services/gamification');
+
+
 const AWAITING_TIMEOUT = 5 * 60 * 1000; // 5 минут
 
 // Функция для установки ожидания с таймаутом
@@ -97,16 +102,20 @@ setInterval(() => {
 
 // ========== КОМАНДЫ ==========
 
-// /start - Регистрация
-bot.onText(/\/start/, async (msg) => {
+// ========== ОБНОВЛЁННАЯ КОМАНДА /start ==========
+
+bot.onText(/\/start(.*)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
+    const startParam = match[1] ? match[1].trim() : ''; // Для реферальных ссылок
 
     try {
         let user = await User.findOne({ telegramId });
+        let isNewUser = false;
 
         if (!user) {
             console.log(`📝 Новый пользователь: ${msg.from.username || msg.from.first_name}`);
+            isNewUser = true;
 
             user = new User({
                 telegramId,
@@ -115,26 +124,68 @@ bot.onText(/\/start/, async (msg) => {
                 lastName: msg.from.last_name
             });
 
+            // Обработка реферальной ссылки
+            if (startParam && startParam.startsWith('ref_')) {
+                const referrerId = startParam.split('_')[1];
+                user.marketing.referredBy = referrerId;
+
+                // TODO: Начислить бонус рефереру
+            }
+
             await user.save();
 
+            // 🎮 ОНБОРДИНГ: Выбор персонажа
             await bot.sendMessage(chatId,
                 `🎉 Добро пожаловать, ${msg.from.first_name}!\n\n` +
-                `💪 Отправь голосовое сообщение с описанием тренировки!\n\n` +
-                `Например: "Жим лёжа три подхода по 50 кг, 12 повторений"\n\n` +
-                `📋 Команды:\n` +
-                `/stats - статистика\n` +
-                `/progress упражнение - график прогресса\n` +
-                `/top - топ упражнений\n` +
-                `/export - скачать все тренировки (Excel)\n` +
-                `/help - помощь`
+                `💪 GymAI - твой умный помощник для тренировок!\n\n` +
+                `Выбери своего тренировочного напарника:`
             );
-        } else {
+
+            const characters = gamificationService.getAllCharacters();
+            const keyboard = {
+                inline_keyboard: Object.values(characters).map(char => ([
+                    {
+                        text: `${char.emoji} ${char.name} - ${char.description}`,
+                        callback_data: `select_character_${char.id}`
+                    }
+                ]))
+            };
+
             await bot.sendMessage(chatId,
-                `👋 С возвращением, ${msg.from.first_name}!\n\n` +
-                `💪 Всего тренировок: ${user.stats.totalWorkouts}\n\n` +
-                `Отправь голосовое или используй команды:\n` +
-                `/stats /progress /export /top`
+                `Твой персонаж будет расти вместе с тобой! 🌟`,
+                { reply_markup: keyboard }
             );
+
+        } else {
+            // Существующий пользователь
+            const characterInfo = gamificationService.getCharacterInfo(user);
+            const tier = subscriptionService.getEffectiveTier(user);
+
+            let statusMessage = `👋 С возвращением, ${msg.from.first_name}!\n\n`;
+
+            if (characterInfo) {
+                statusMessage += `${characterInfo.emoji} ${characterInfo.name} - Lvl ${characterInfo.level}\n`;
+                statusMessage += `XP: ${characterInfo.xp}/${characterInfo.nextLevelXP} `;
+                statusMessage += `(${characterInfo.progress}%)\n\n`;
+            }
+
+            statusMessage += `💪 Всего тренировок: ${user.stats.totalWorkouts}\n`;
+            statusMessage += `🔥 Серия: ${user.stats.currentStreak} дней\n`;
+            statusMessage += `🏆 Достижений: ${user.gamification.achievements.length}\n\n`;
+
+            // Показываем статус подписки
+            if (tier === 'free') {
+                const remaining = user.subscription.limits.workoutsLimit -
+                    user.subscription.limits.workoutsThisMonth;
+                statusMessage += `⚠️ Free tier: ${remaining}/${user.subscription.limits.workoutsLimit} тренировок осталось\n\n`;
+            } else {
+                statusMessage += `💎 ${tier.toUpperCase()} подписка активна\n\n`;
+            }
+
+            statusMessage += `Отправь голосовое или используй команды:\n`;
+            statusMessage += `/stats /progress /export /top`;
+
+            await bot.sendMessage(chatId, statusMessage);
         }
 
         user.lastActive = new Date();
@@ -143,6 +194,167 @@ bot.onText(/\/start/, async (msg) => {
     } catch (error) {
         console.error('❌ Ошибка /start:', error);
         await bot.sendMessage(chatId, '😕 Ошибка при регистрации. Попробуй ещё раз.');
+    }
+});
+
+// ========== ОБРАБОТКА ВЫБОРА ПЕРСОНАЖА ==========
+
+bot.on('callback_query', async (query) => {
+    const data = query.data;
+    const chatId = query.message.chat.id;
+    const telegramId = query.from.id;
+
+    try {
+        // Выбор персонажа
+        if (data.startsWith('select_character_')) {
+            const characterType = data.replace('select_character_', '');
+
+            const result = await gamificationService.selectCharacter(telegramId, characterType);
+
+            await bot.answerCallbackQuery(query.id, {
+                text: `✅ Выбран ${result.character}!`
+            });
+
+            await bot.editMessageText(
+                `✅ Отлично! Теперь ${result.emoji} ${result.character} - твой напарник!\n\n` +
+                `Он будет расти вместе с тобой. Чем больше тренировок - тем сильнее становится!`,
+                {
+                    chat_id: chatId,
+                    message_id: query.message.message_id
+                }
+            );
+
+            // 🎁 Предлагаем trial после выбора персонажа
+            setTimeout(async () => {
+                const user = await User.findOne({ telegramId });
+                await paywallManager.showTrialOffer(user, bot, chatId);
+            }, 2000);
+        }
+
+        // ========== АКТИВАЦИЯ TRIAL ==========
+        else if (data === 'activate_trial') {
+            const result = await subscriptionService.activateTrial(telegramId);
+
+            if (result.success) {
+                await bot.answerCallbackQuery(query.id, {
+                    text: '🎉 Trial активирован!'
+                });
+
+                await bot.editMessageText(
+                    `✅ ${result.message}\n\n` +
+                    `Теперь доступны все Premium фичи:\n` +
+                    `✨ AI-тренер\n` +
+                    `🏆 Челленджи\n` +
+                    `⚡ +50% XP\n` +
+                    `📊 Продвинутая статистика\n\n` +
+                    `Начинай тренироваться! 💪`,
+                    {
+                        chat_id: chatId,
+                        message_id: query.message.message_id
+                    }
+                );
+            } else {
+                await bot.answerCallbackQuery(query.id, {
+                    text: result.message,
+                    show_alert: true
+                });
+            }
+        }
+
+        // ========== ПОДПИСКА ==========
+        else if (data.startsWith('subscribe_')) {
+            const parts = data.split('_');
+            const tier = parts[1]; // basic, premium
+
+            await bot.answerCallbackQuery(query.id);
+
+            await paywallManager.createPaymentInvoice(bot, chatId, tier);
+        }
+
+        // ========== ОТКАЗ ОТ PAYWALL ==========
+        else if (data.startsWith('paywall_decline') || data === 'trial_decline') {
+            await bot.answerCallbackQuery(query.id);
+
+            await bot.sendMessage(chatId,
+                `Помоги нам стать лучше! 📊\n\n` +
+                `Почему не подписался?\n` +
+                `1️⃣ Слишком дорого\n` +
+                `2️⃣ Не нужны Premium фичи\n` +
+                `3️⃣ Мало времени на тренировки\n` +
+                `4️⃣ Другое (напиши)`
+            );
+
+            // Сохраняем отказ
+            await paywallManager.saveDeclineReason(
+                telegramId,
+                data === 'trial_decline' ? 'trial_end' : 'paywall',
+                'no_reason'
+            );
+        }
+
+        // ... остальные обработчики callback_query
+
+    } catch (error) {
+        console.error('❌ Ошибка callback:', error);
+        await bot.answerCallbackQuery(query.id, { text: '😕 Ошибка' });
+    }
+});
+
+// ========== ОБРАБОТКА УСПЕШНОЙ ОПЛАТЫ ==========
+
+bot.on('pre_checkout_query', async (query) => {
+    // Подтверждаем что можем принять платёж
+    await bot.answerPreCheckoutQuery(query.id, true);
+});
+
+bot.on('successful_payment', async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+    const payment = msg.successful_payment;
+
+    try {
+        console.log('💰 Успешная оплата:', payment);
+
+        // Парсим tier из payload
+        const payload = payment.invoice_payload;
+        const tier = payload.split('_')[0]; // basic, premium, pro
+
+        // Создаём подписку
+        const result = await subscriptionService.createSubscription(
+            telegramId,
+            tier,
+            {
+                amount: payment.total_amount,
+                currency: payment.currency,
+                telegramPaymentId: payment.telegram_payment_charge_id
+            }
+        );
+
+        if (result.success) {
+            const user = await User.findOne({ telegramId });
+            const characterInfo = gamificationService.getCharacterInfo(user);
+
+            // Начисляем бонус
+            await user.addXP(500);
+            await user.save();
+
+            await bot.sendMessage(chatId,
+                `🎉 *ПОДПИСКА АКТИВИРОВАНА!*\n\n` +
+                `${result.message}\n\n` +
+                `🎁 *БОНУСЫ:*\n` +
+                `✅ +500 XP начислено!\n` +
+                `✅ ${characterInfo.name} получил бейдж "Supporter"\n` +
+                `✅ Все лимиты сняты\n\n` +
+                `Теперь тренируйся без ограничений! 💪`,
+                { parse_mode: 'Markdown' }
+            );
+        }
+
+    } catch (error) {
+        console.error('❌ Ошибка обработки платежа:', error);
+        await bot.sendMessage(chatId,
+            '😕 Что-то пошло не так с подпиской. Напиши в поддержку!'
+        );
     }
 });
 
@@ -762,8 +974,6 @@ async function handleChatMessage(msg, text) {
 
 // ========== ОБРАБОТКА ГОЛОСА ==========
 
-// ========== ОБРАБОТКА ГОЛОСА ==========
-
 bot.on('voice', async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
@@ -777,10 +987,19 @@ bot.on('voice', async (msg) => {
             );
         }
 
+        // ✅ ПРОВЕРКА ЛИМИТОВ
+        const limitCheck = await subscriptionService.checkWorkoutLimit(telegramId);
+
+        if (!limitCheck.allowed) {
+            // Показываем paywall
+            await paywallManager.showLimitReachedPaywall(user, bot, chatId);
+            return;
+        }
+
         await bot.sendChatAction(chatId, 'typing');
         console.log(`📥 Войс от ${msg.from.username || msg.from.first_name}`);
 
-        // 1. Скачиваем голосовое
+        // 1. Скачиваем и транскрибируем (без изменений)
         const file = await bot.getFile(fileId);
         const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
 
@@ -799,22 +1018,19 @@ bot.on('voice', async (msg) => {
             writer.on('error', reject);
         });
 
-        // 2. Транскрибация
         const text = await parserService.transcribe(tempFilePath);
         console.log('🎤 Транскрипция:', text);
-
         fs.unlinkSync(tempFilePath);
 
-        // ✅ НОВОЕ: Проверяем намерение
+        // Проверяем намерение
         const isWorkoutDescription = await detectWorkoutIntent(text);
 
         if (!isWorkoutDescription) {
-            // Это не тренировка - обрабатываем как обычное сообщение
-            console.log('💬 Голосовое - обычное сообщение, не тренировка');
+            console.log('💬 Голосовое - обычное сообщение');
             return await handleChatMessage({ chat: { id: chatId } }, text);
         }
 
-        // 3. Парсинг с контекстом
+        // 2. Парсим тренировку
         const context = userContext[telegramId];
         const parsed = await parserService.parseWorkout(text, context);
         console.log('✅ Распарсили:', parsed);
@@ -827,7 +1043,7 @@ bot.on('voice', async (msg) => {
             throw new Error('Не смог определить упражнение. Попробуй ещё раз!');
         }
 
-        // 4. Сохраняем в MongoDB
+        // 3. Сохраняем тренировку
         const workout = new Workout({
             userId: user._id,
             telegramId,
@@ -842,40 +1058,57 @@ bot.on('voice', async (msg) => {
         await workout.save();
         console.log('💾 Сохранено в MongoDB');
 
-        // 5. Обновляем статистику пользователя
+        // 4. Обновляем статистику
         user.stats.totalWorkouts++;
         user.stats.monthlyWorkouts++;
-        user.stats.lastWorkoutDate = new Date();
         user.lastActive = new Date();
+
+        // 🔥 Обновляем серию
+        await gamificationService.updateStreak(telegramId);
+
+        // ✅ Увеличиваем счётчик тренировок для free tier
+        await subscriptionService.incrementWorkoutCount(telegramId);
+
         await user.save();
 
-        // 6. Сохраняем контекст
+        // 5. 💫 ГЕЙМИФИКАЦИЯ: Начисляем XP
+        const xpResult = await gamificationService.awardWorkoutXP(telegramId, workout);
+
         userContext[telegramId] = parsed;
 
-        // 7. Подтверждение
+        // 6. Подтверждение с XP и уровнем
         const volume = (parsed.sets || 0) * (parsed.reps || 0) * (parsed.weight || 0);
-        const dateLabel = parsed.workoutDate ? new Date(parsed.workoutDate).toLocaleDateString('ru-RU') : 'сегодня';
+        const characterInfo = gamificationService.getCharacterInfo(user);
 
-        let setsRepsText = '';
-        if (parsed.sets && parsed.reps) {
-            setsRepsText = `${parsed.sets} подходов × ${parsed.reps} повторений`;
-        } else if (parsed.reps && !parsed.sets) {
-            setsRepsText = `${parsed.reps} повторений (1 подход)`;
-        } else if (parsed.sets && !parsed.reps) {
-            setsRepsText = `${parsed.sets} подходов`;
-        } else {
-            setsRepsText = 'не указано';
+        let confirmMessage = `✅ *Записал! +${xpResult.xpAdded} XP*\n\n`;
+
+        // Показываем прогресс персонажа
+        const xpBar = '━'.repeat(Math.floor(characterInfo.progress / 10)) +
+            '○'.repeat(10 - Math.floor(characterInfo.progress / 10));
+        confirmMessage += `${characterInfo.emoji} ${characterInfo.name} - Lvl ${characterInfo.level}\n`;
+        confirmMessage += `${xpBar} ${characterInfo.xp}/${characterInfo.nextLevelXP}\n\n`;
+
+        // Level up?
+        if (xpResult.leveledUp) {
+            confirmMessage += `🎉 *LEVEL UP! Теперь ${xpResult.currentLevel} уровень!*\n\n`;
         }
 
-        const confirmMessage = `✅ *Записал!*\n\n` +
-            `📅 Дата: ${dateLabel}\n` +
-            `📋 Упражнение: ${parsed.exercise}\n` +
-            `📝 Описание: ${setsRepsText}` +
-            (parsed.weight ? `\n⚖️ Вес: ${parsed.weight} кг` : '') +
-            `\n💪 Объём: ${volume > 0 ? volume.toLocaleString() + ' кг' : '-'}\n` +
-            (parsed.feeling ? `😊 Самочувствие: ${parsed.feeling}\n` : '') +
-            (parsed.notes ? `📝 Заметка: ${parsed.notes}\n` : '') +
-            `\n📊 Всего тренировок: ${user.stats.totalWorkouts}`;
+        // Эволюция?
+        if (xpResult.evolved) {
+            confirmMessage += `🌟 *${characterInfo.name} эволюционировал!*\n\n`;
+        }
+
+        confirmMessage += `📋 ${parsed.exercise}\n`;
+        confirmMessage += `📝 ${parsed.sets || '-'} подходов × ${parsed.reps || '-'} повторений\n`;
+        if (parsed.weight) confirmMessage += `⚖️ ${parsed.weight} кг\n`;
+        confirmMessage += `💪 Объём: ${volume > 0 ? volume.toLocaleString() + ' кг' : '-'}\n\n`;
+        confirmMessage += `🔥 Серия: ${user.stats.currentStreak} дней\n`;
+        confirmMessage += `📊 Всего тренировок: ${user.stats.totalWorkouts}`;
+
+        // Показываем оставшийся лимит для free tier
+        if (limitCheck.remaining !== undefined) {
+            confirmMessage += `\n\n⚠️ Осталось ${limitCheck.remaining} бесплатных тренировок`;
+        }
 
         const keyboard = {
             inline_keyboard: [
@@ -898,6 +1131,14 @@ bot.on('voice', async (msg) => {
             reply_markup: keyboard
         });
 
+        // 🎁 Показываем trial оффер после первой тренировки
+        const shouldShowTrial = await subscriptionService.shouldShowTrialOffer(telegramId);
+        if (shouldShowTrial) {
+            setTimeout(async () => {
+                await paywallManager.showTrialOffer(user, bot, chatId);
+            }, 3000);
+        }
+
     } catch (error) {
         console.error('❌ Ошибка обработки войса:', error);
         await bot.sendMessage(chatId,
@@ -905,6 +1146,84 @@ bot.on('voice', async (msg) => {
         );
     }
 });
+
+// ========== КОМАНДА /subscribe ==========
+
+bot.onText(/\/subscribe/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id;
+
+    try {
+        const user = await User.findOne({ telegramId });
+
+        if (!user) {
+            return await bot.sendMessage(chatId, '⚠️ Сначала нажми /start');
+        }
+
+        const tier = subscriptionService.getEffectiveTier(user);
+
+        if (tier !== 'free' && user.subscription.isActive) {
+            return await bot.sendMessage(chatId,
+                `💎 У тебя уже есть ${tier.toUpperCase()} подписка!\n\n` +
+                `Действует до: ${user.subscription.expiresAt.toLocaleDateString('ru-RU')}`
+            );
+        }
+
+        // Показываем выбор тиров
+        const message = `💎 *ВЫБЕРИ ПОДПИСКУ*\n\n` +
+            `🥉 *BASIC - $4.99/мес*\n` +
+            `✅ Безлимит тренировок\n` +
+            `✅ Персонаж до 15 lvl\n` +
+            `✅ Графики + экспорт\n\n` +
+            `🥇 *PREMIUM - $9.99/мес* 🔥\n` +
+            `✅ Всё из Basic\n` +
+            `✅ AI-персональный тренер\n` +
+            `✅ Безлимит уровней\n` +
+            `✅ Челленджи + лидерборд\n` +
+            `✅ +50% XP бонус\n\n` +
+            `💰 Все платежи через Telegram Stars`;
+
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '🥉 Basic $4.99', callback_data: 'subscribe_basic' }
+                ],
+                [
+                    { text: '🥇 Premium $9.99', callback_data: 'subscribe_premium' }
+                ]
+            ]
+        };
+
+        await bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+
+    } catch (error) {
+        console.error('❌ Ошибка /subscribe:', error);
+        await bot.sendMessage(chatId, '😕 Ошибка. Попробуй ещё раз.');
+    }
+});
+
+// ========== CRON: Проверка истёкших подписок ==========
+// Запускать раз в день
+
+const cron = require('node-cron');
+
+cron.schedule('0 0 * * *', async () => {
+    console.log('⏰ Проверка истёкших подписок...');
+
+    const expired = await subscriptionService.checkExpiredSubscriptions();
+
+    console.log(`✅ Обработано ${expired} истёкших подписок`);
+});
+
+module.exports = {
+    subscriptionService,
+    paywallManager,
+    gamificationService
+};
+
 // ========== ОБРАБОТЧИКИ INLINE КНОПОК ==========
 
 // Хранилище для ожидания ввода

@@ -1,4 +1,12 @@
 {
+  "name": "gymaibot",
+  "version": "2.0.0",
+  "description": "AI-powered gym workout tracker with gamification and monetization",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "nodemon bot.js"
+  },
   "dependencies": {
     "axios": "^1.13.2",
     "chart.js": "^4.5.1",
@@ -10,6 +18,22 @@
     "exceljs": "^4.4.0",
     "mongoose": "^8.21.0",
     "node-telegram-bot-api": "^0.67.0",
-    "openai": "^6.15.0"
-  }
+    "openai": "^6.15.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "fitness",
+    "gym",
+    "ai",
+    "openai",
+    "gamification",
+    "saas"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
