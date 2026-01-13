@@ -11,6 +11,28 @@ const userSchema = new mongoose.Schema({
     firstName: String,
     lastName: String,
 
+    profile: {
+        weight: Number,           // kg
+        height: Number,           // cm
+        age: Number,
+        gender: {
+            type: String,
+            enum: ['male', 'female', 'other', null],
+            default: null
+        },
+        goal: {
+            type: String,
+            enum: ['strength', 'hypertrophy', 'endurance', 'weight_loss', 'general', null],
+            default: null
+        },
+        experience: {
+            type: String,
+            enum: ['beginner', 'intermediate', 'advanced', null],
+            default: null
+        },
+        completedAt: Date
+    },
+
     // Настройки
     settings: {
         language: { type: String, default: 'ru' },
@@ -81,7 +103,9 @@ const userSchema = new mongoose.Schema({
         // Лимиты
         limits: {
             workoutsThisMonth: { type: Number, default: 0 },
-            workoutsLimit: { type: Number, default: 15 }, // Free tier лимит
+            workoutsLimit: { type: Number, default: Infinity },  // ← CHANGE from 15
+            voiceLogsThisMonth: { type: Number, default: 0 },    // ← ADD
+            voiceLogsLimit: { type: Number, default: 3 },        // ← ADD
             lastResetDate: Date
         },
 

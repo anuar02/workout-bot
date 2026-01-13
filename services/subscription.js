@@ -4,7 +4,8 @@ const User = require('../models/User');
 const SUBSCRIPTION_TIERS = {
     free: {
         price: 0,
-        workoutsLimit: 15,
+        workoutsLimit: Infinity,  // ← CHANGE from 15 to Infinity
+        voiceLogsLimit: 3,         // ← ADD this new line
         characterMaxLevel: 3,
         features: {
             export: false,
@@ -12,7 +13,7 @@ const SUBSCRIPTION_TIERS = {
             aiCoach: false,
             leaderboard: false,
             challenges: false,
-            fullHistory: false
+            fullHistory: false  // ← ADD this line
         }
     },
     basic: {
@@ -156,40 +157,43 @@ class SubscriptionService {
     }
 
     // Проверка лимитов
-    async checkWorkoutLimit(telegramId) {
+    async checkWorkoutLimit(telegramId, isVoiceMessage = false) {
         const user = await User.findOne({ telegramId });
 
         if (!user) return { allowed: false, reason: 'User not found' };
 
-        // Trial или платная подписка - безлимит
+        // Trial or paid = unlimited
         if (this.isTrialActive(user) ||
             (user.subscription.isActive && user.subscription.tier !== 'free')) {
             return { allowed: true };
         }
 
-        // Free tier - проверяем лимит
-        const canRecord = user.canRecordWorkout();
+        // FREE TIER: Check voice limit only
+        if (isVoiceMessage) {
+            const now = new Date();
+            const lastReset = user.subscription.limits.lastResetDate;
 
-        if (!canRecord) {
-            const remaining = user.subscription.limits.workoutsLimit -
-                user.subscription.limits.workoutsThisMonth;
+            if (!lastReset || lastReset.getMonth() !== now.getMonth()) {
+                user.subscription.limits.voiceLogsThisMonth = 0;
+                user.subscription.limits.lastResetDate = now;
+                await user.save();
+            }
 
-            return {
-                allowed: false,
-                reason: 'limit_reached',
-                message: `🔒 Лимит исчерпан!\n\n` +
-                    `Записано ${user.subscription.limits.workoutsThisMonth}/${user.subscription.limits.workoutsLimit} тренировок.\n\n` +
-                    `💎 Оформи подписку для безлимита!`,
-                workoutsRecorded: user.subscription.limits.workoutsThisMonth,
-                workoutsLimit: user.subscription.limits.workoutsLimit
-            };
+            const voiceLimit = 3;
+
+            if ((user.subscription.limits.voiceLogsThisMonth || 0) >= voiceLimit) {
+                return {
+                    allowed: false,
+                    reason: 'voice_limit_reached',
+                    message: `🎤 Лимит голосовых: ${voiceLimit}/месяц исчерпан!\n\n` +
+                        `💬 Продолжай записывать ТЕКСТОМ - безлимит!\n\n` +
+                        `💎 Или оформи Basic ($4.99) для безлимита голосовых.`
+                };
+            }
         }
 
-        return {
-            allowed: true,
-            remaining: user.subscription.limits.workoutsLimit -
-                user.subscription.limits.workoutsThisMonth - 1
-        };
+        // Text logging = always free
+        return { allowed: true };
     }
 
     // Увеличить счётчик тренировок
