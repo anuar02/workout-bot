@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const axios = require('axios');
-const milestoneCelebrations = require('../../services/milestoneCelebrations');
 const User = require('../../models/User');
 const Workout = require('../../models/Workout');
 const parserService = require('../../services/parser');

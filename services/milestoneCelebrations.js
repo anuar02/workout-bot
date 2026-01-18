@@ -1,4 +1,3 @@
-const heatmapGenerator = require('../utils/heatmapGenerator');
 
 class MilestoneCelebrations {
 
@@ -26,43 +25,6 @@ class MilestoneCelebrations {
 
             // Small delay for effect
             await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // Generate and send heatmap
-            const heatmapPath = await heatmapGenerator.generateHeatmap(
-                user.telegramId,
-                Math.min(currentWorkouts * 2, 180) // Show longer period for higher milestones
-            );
-
-            const gamificationService = require('./gamification');
-            const characterInfo = gamificationService.getCharacterInfo(user);
-
-            await bot.sendPhoto(chatId, heatmapPath, {
-                caption:
-                    `🎊 ${characterInfo.emoji} *${characterInfo.name}* гордится тобой!\n\n` +
-                    `📊 ${currentWorkouts} тренировок записано\n` +
-                    `🔥 Серия: ${user.stats.currentStreak} дней\n` +
-                    `📈 Уровень: ${characterInfo.level}\n\n` +
-                    `Продолжай в том же духе! 💪`,
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            { text: '🎮 Мой персонаж', callback_data: 'show_character_info' }
-                        ],
-                        [
-                            { text: '🏆 Достижения', callback_data: 'show_achievements' }
-                        ],
-                        [
-                            { text: '💎 Premium фичи', callback_data: 'show_premium_info' }
-                        ]
-                    ]
-                }
-            });
-
-            // Cleanup
-            setTimeout(() => {
-                heatmapGenerator.cleanup(heatmapPath);
-            }, 5000);
 
             console.log(`🎉 Milestone celebration: ${user.username} - ${currentWorkouts} workouts`);
             return true;
@@ -104,20 +66,6 @@ class MilestoneCelebrations {
                 `Смотри как выглядит настоящая дисциплина:`,
                 { parse_mode: 'Markdown' }
             );
-
-            const heatmapPath = await heatmapGenerator.generateHeatmap(user.telegramId, Math.min(streakDays + 30, 180));
-
-            await bot.sendPhoto(chatId, heatmapPath, {
-                caption:
-                    `🔥 *Серия: ${streakDays} дней!*\n\n` +
-                    `Это не случайность — это характер! 💪\n\n` +
-                    `Не останавливайся сейчас!`,
-                parse_mode: 'Markdown'
-            });
-
-            setTimeout(() => {
-                heatmapGenerator.cleanup(heatmapPath);
-            }, 5000);
 
             return true;
 

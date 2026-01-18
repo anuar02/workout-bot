@@ -1,4 +1,3 @@
-const characterCallbacks = require('./character');
 const subscriptionCallbacks = require('./subscription');
 const workoutCallbacks = require('./workout');
 const settingsCallbacks = require('./settings');
