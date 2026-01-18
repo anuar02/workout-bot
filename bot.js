@@ -3,26 +3,37 @@ const TelegramBot = require('node-telegram-bot-api');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
 const express = require('express');
-const app = express();
+const cors = require('cors'); // 1. Импортируем CORS здесь
+
 const subscriptionService = require('./services/subscription');
 const exportService = require('./services/export');
 const commandHandlers = require('./handlers/commands');
 const messageHandlers = require('./handlers/messages');
 const callbackHandlers = require('./handlers/callbacks');
-
 const miniappRoutes = require('./routes/miniapp');
+
+const app = express();
+
+// ========== 2. CORS MIDDLEWARE (САМОЕ ПЕРВОЕ!) ==========
+// Это должно быть ДО любых роутов
+app.use(cors({
+    origin: process.env.MINIAPP_URL, // Убедитесь, что тут https://...vercel.app без слэша в конце
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Парсинг JSON (обязательно для API)
+app.use(express.json());
+
+// ========== 3. API ROUTES ==========
+// Теперь роуты идут ПОСЛЕ cors
 app.use('/api', miniappRoutes);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 API server running on port ${PORT}`);
 });
-
-const cors = require('cors');
-app.use(cors({
-    origin: process.env.MINIAPP_URL,
-    credentials: true
-}));
 
 // ========== GRACEFUL BOT INITIALIZATION ==========
 let bot;
@@ -103,7 +114,8 @@ function setupHandlers() {
     bot.onText(/\/start(.*)/, (msg, match) => improvedStart(bot, msg, match));
     bot.onText(/\/profile/, (msg) => commandHandlers.profile(bot, msg));
     const enhancedStats = require('./handlers/commands/enhancedStats');
-    bot.onText(/\/stats( (.+))?/, (msg, match) => enhancedStats(bot, msg, match));    bot.onText(/\/progress( (.+))?/, (msg, match) => commandHandlers.progress(bot, msg, match));
+    bot.onText(/\/stats( (.+))?/, (msg, match) => enhancedStats(bot, msg, match));
+    bot.onText(/\/progress( (.+))?/, (msg, match) => commandHandlers.progress(bot, msg, match));
     bot.onText(/\/export( (excel|csv))?/, (msg, match) => commandHandlers.exportData(bot, msg, match));
     bot.onText(/\/subscribe/, (msg) => commandHandlers.subscribe(bot, msg));
     bot.onText(/\/top/, (msg) => commandHandlers.top(bot, msg));
@@ -111,8 +123,12 @@ function setupHandlers() {
     bot.onText(/\/edit/, (msg) => commandHandlers.edit(bot, msg));
     bot.onText(/\/help/, (msg) => commandHandlers.help(bot, msg));
     bot.onText(/\/costs/, (msg) => commandHandlers.costs(bot, msg));
+
     bot.onText(/\/dashboard/, async (msg) => {
         const chatId = msg.chat.id;
+
+        // DEBUG: Можно раскомментировать для проверки
+        // console.log("Sending MiniApp URL:", process.env.MINIAPP_URL);
 
         await bot.sendMessage(chatId, '📱 *GymAI Dashboard*\n\nОткрой полнофункциональный дашборд:', {
             parse_mode: 'Markdown',
