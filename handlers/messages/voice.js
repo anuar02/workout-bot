@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const axios = require('axios');
+const milestoneCelebrations = require('../../services/milestoneCelebrations');
 const User = require('../../models/User');
 const Workout = require('../../models/Workout');
 const parserService = require('../../services/parser');
@@ -9,6 +10,7 @@ const subscriptionService = require('../../services/subscription');
 const gamificationService = require('../../services/gamification');
 const paywallManager = require('../../services/paywallManager');
 const { userContext } = require('../../utils/state');
+const { celebrateFirstWorkout } = require('../../services/onboarding');
 
 async function handleVoice(bot, msg) {
     const chatId = msg.chat.id;
@@ -145,6 +147,12 @@ async function handleVoice(bot, msg) {
         }
 
         await user.save();
+
+        // Celebrate first workout
+        if (user.stats.totalWorkouts === 1) {
+            await celebrateFirstWorkout(bot, chatId, user);
+        }
+
         userContext[telegramId] = workouts[workouts.length - 1];
 
         // Get updated user and character info

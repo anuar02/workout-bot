@@ -5,7 +5,8 @@ function getMainMenu(user) {
         keyboard: [
             ['🎮 Мой персонаж', '📊 Статистика'],
             ['🏆 Достижения', '📈 Прогресс'],
-            ['💎 Premium', '⚙️ Настройки']
+            ['💎 Premium', '⚙️ Настройки'],
+            [{ text: '📱 Открыть Dashboard', web_app: { url: process.env.MINIAPP_URL } }]
         ],
         resize_keyboard: true,
         persistent: true

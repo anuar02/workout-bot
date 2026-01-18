@@ -2,6 +2,7 @@ const characterCallbacks = require('./character');
 const subscriptionCallbacks = require('./subscription');
 const workoutCallbacks = require('./workout');
 const settingsCallbacks = require('./settings');
+const improvedCharacter = require('./improvedCharacter');
 const profileHandler = require('../commands/profile');
 
 async function handleCallback(bot, query) {
@@ -35,7 +36,7 @@ async function handleCallback(bot, query) {
         }
         // Character selection
         if (data.startsWith('select_character_') || data === 'show_character_selection') {
-            return await characterCallbacks.handleCharacter(bot, query);
+            return await improvedCharacter.handleImprovedCharacterSelection(bot, query);
         }
 
         // Profile
@@ -47,21 +48,6 @@ async function handleCallback(bot, query) {
         if (data.startsWith('subscribe_') || data === 'activate_trial' || data === 'trial_later' ||
             data.startsWith('paywall_decline') || data === 'trial_decline') {
             return await subscriptionCallbacks.handleSubscription(bot, query);
-        }
-
-        // Workout actions
-        if (data.startsWith('add_note_') || data.startsWith('add_feeling_') ||
-            data.startsWith('feeling_') || data.startsWith('change_date_') ||
-            data.startsWith('date_') || data.startsWith('edit_') ||
-            data.startsWith('delete_') || data === 'cancel_delete') {
-            return await workoutCallbacks.handleWorkout(bot, query);
-        }
-
-        // Settings & account
-        console.log(data)
-        if (data.startsWith('settings_') || data === 'delete_account' ||
-            data === 'confirm_delete_account' || data === 'cancel_delete_account') {
-            return await settingsCallbacks.handleSettings(bot, query);
         }
 
         // Stats & exports

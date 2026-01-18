@@ -1,3 +1,4 @@
+const milestoneCelebrations = require('../../services/milestoneCelebrations');
 const User = require('../../models/User');
 const Workout = require('../../models/Workout');
 const { setAwaitingInput } = require('../../utils/state');
@@ -176,6 +177,13 @@ async function handleWorkout(bot, query) {
         if (user) {
             user.stats.totalWorkouts = Math.max(0, user.stats.totalWorkouts - 1);
             await user.save();
+        }
+
+        // Check milestones
+        await milestoneCelebrations.checkAndCelebrate(bot, chatId, user);
+
+        if (user.stats.currentStreak > 0) {
+            await milestoneCelebrations.celebrateStreak(bot, chatId, user, user.stats.currentStreak);
         }
 
         await bot.answerCallbackQuery(query.id, { text: '🗑️ Тренировка удалена' });

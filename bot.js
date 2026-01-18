@@ -2,12 +2,27 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const mongoose = require('mongoose');
 const cron = require('node-cron');
-
+const express = require('express');
+const app = express();
 const subscriptionService = require('./services/subscription');
 const exportService = require('./services/export');
 const commandHandlers = require('./handlers/commands');
 const messageHandlers = require('./handlers/messages');
 const callbackHandlers = require('./handlers/callbacks');
+
+const miniappRoutes = require('./routes/miniapp');
+app.use('/api', miniappRoutes);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 API server running on port ${PORT}`);
+});
+
+const cors = require('cors');
+app.use(cors({
+    origin: process.env.MINIAPP_URL,
+    credentials: true
+}));
 
 // ========== GRACEFUL BOT INITIALIZATION ==========
 let bot;
@@ -84,10 +99,11 @@ initializeBot().then(botInstance => {
 
 function setupHandlers() {
     // ========== COMMANDS ==========
-    bot.onText(/\/start(.*)/, (msg, match) => commandHandlers.start(bot, msg, match));
+    const improvedStart = require('./handlers/commands/improvedStart');
+    bot.onText(/\/start(.*)/, (msg, match) => improvedStart(bot, msg, match));
     bot.onText(/\/profile/, (msg) => commandHandlers.profile(bot, msg));
-    bot.onText(/\/stats( (.+))?/, (msg, match) => commandHandlers.stats(bot, msg, match));
-    bot.onText(/\/progress( (.+))?/, (msg, match) => commandHandlers.progress(bot, msg, match));
+    const enhancedStats = require('./handlers/commands/enhancedStats');
+    bot.onText(/\/stats( (.+))?/, (msg, match) => enhancedStats(bot, msg, match));    bot.onText(/\/progress( (.+))?/, (msg, match) => commandHandlers.progress(bot, msg, match));
     bot.onText(/\/export( (excel|csv))?/, (msg, match) => commandHandlers.exportData(bot, msg, match));
     bot.onText(/\/subscribe/, (msg) => commandHandlers.subscribe(bot, msg));
     bot.onText(/\/top/, (msg) => commandHandlers.top(bot, msg));
@@ -95,6 +111,21 @@ function setupHandlers() {
     bot.onText(/\/edit/, (msg) => commandHandlers.edit(bot, msg));
     bot.onText(/\/help/, (msg) => commandHandlers.help(bot, msg));
     bot.onText(/\/costs/, (msg) => commandHandlers.costs(bot, msg));
+    bot.onText(/\/dashboard/, async (msg) => {
+        const chatId = msg.chat.id;
+
+        await bot.sendMessage(chatId, '📱 *GymAI Dashboard*\n\nОткрой полнофункциональный дашборд:', {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[
+                    {
+                        text: '🚀 Открыть Dashboard',
+                        web_app: { url: process.env.MINIAPP_URL }
+                    }
+                ]]
+            }
+        });
+    });
 
     // ========== MESSAGE HANDLERS ==========
     bot.on('message', async (msg) => {
