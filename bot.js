@@ -16,11 +16,26 @@ const app = express();
 
 // ========== 2. CORS MIDDLEWARE (САМОЕ ПЕРВОЕ!) ==========
 // Это должно быть ДО любых роутов
+const allowedOrigins = [
+    'https://gymai-miniapp.vercel.app',             // Ваш Vercel
+    'https://gymai-miniapp-owy02rrnc-anuar02s-projects.vercel.app', // Ссылка на превью (если есть)
+    'http://localhost:3000',                        // Локальная разработка
+    'http://localhost:5173'                         // Vite (если используете его)
+];
+
 app.use(cors({
-    origin: process.env.MINIAPP_URL, // Убедитесь, что тут https://...vercel.app без слэша в конце
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.log("Blocked by CORS:", origin); // Для отладки
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
 
 // Парсинг JSON (обязательно для API)
